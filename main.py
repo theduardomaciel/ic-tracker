@@ -2,21 +2,28 @@ import re
 from datetime import datetime, timedelta
 import requests
 from notion_client import Client
-# pip install requests notion-client
 
 # Inicializar o cliente Notion
 notion = Client(auth="secret_F0IdS4Tes9mqkUpDtL5dtq832slEjdwKOWb495qCxaM")
 
-# Database ID do Notion
+# ID do database de "Matérias" no Notion
 database_id = "72d47ee714644ae9a20de5f47d1b89e4"
+
+# ID do database de "Grade Curricular" mo Notion
+calendar_id = "2f7a85ba073e48579178605b735fff01"
+
+# Início e fim do período letivo
+start_date = datetime(2024, 7, 22) # formato: ano, mês, dia
+end_date = datetime(2024, 12, 7)
 
 # Horários
 horarios_manha = {
     '1': '07:30',
     '2': '08:20',
-    '3': '11:10',
-    '4': '12:00',
-    '5': '12:50'
+    '3': '09:20', # suposição
+    '4': '10:10', # suposição
+    '5': '11:10',
+    '6': '12:00',
 }
 
 horarios_tarde = {
@@ -24,12 +31,22 @@ horarios_tarde = {
     '2': '14:20',
     '3': '15:20',
     '4': '16:10',
-    '5': '17:00',
-    '6': '17:10',
-    '7': '18:00',
+    '5': '17:10',
+    '6': '18:00',
 }
 
 # Cada aula possui 50 minutos de duração (10 minutos de intervalo)
+
+def delete_all_items(database_id):
+    # Recupera todas as páginas do banco de dados
+    response = notion.databases.query(database_id=database_id)
+    pages = response['results']
+
+    # Itera sobre cada página e exclui
+    for page in pages:
+        page_id = page['id']
+        notion.pages.update(page_id=page_id, archived=True)
+        print(f"Página {page_id} arquivada com sucesso.")
 
 # Função para calcular o horário de término da aula
 def calcular_horario_fim(horario_inicio, num_periodos):
@@ -58,6 +75,8 @@ def criar_eventos_recorrentes():
         
         # Criar eventos recorrentes com base nos dados extraídos
         for match in matches:
+            print(match)
+
             dia_semana = match[0]
             turno = match[1]
             horarios_aulas = match[2]
@@ -70,7 +89,12 @@ def criar_eventos_recorrentes():
             else:
                 continue  # Ignorar turno noturno
 
-            print(f"Matéria: {item['properties']['Nome']['title'][0]['plain_text']}")
+            subject_name = item['properties']['Nome']['title'][0]['plain_text']
+            subject_id = item['id']
+
+            print(f"Matéria: {subject_name}")
+            print(f"Dia da semana: {dia_semana}")
+            print(f"Turno: {turno}")
             print(f"Horários das aulas: {horarios_aulas}")
             print(f"Horários do turno: {horarios_turno}")
 
@@ -90,19 +114,40 @@ def criar_eventos_recorrentes():
                 horario_fim = calcular_horario_fim(horarios_turno[periodo_inicial], num_periodos)
                 
                 # Criar o evento no calendário do Notion
-                """ notion.pages.create(
-                    parent={"database_id": "your_calendar_database_id"},
-                    properties={
-                        "Name": {"title": [{"text": {"content": f"Aula {periodo_inicial}-{periodo_final}"}}]},
-                        "Date": {"date": {"start": f"{dia_semana}T{horario_inicio}:00.000Z", "end": f"{dia_semana}T{horario_fim}:00.000Z"}}
-                    }
-                ) """
+                # O Notion não suporta eventos recorrentes, então é necessário criar eventos separados
+                current_date = start_date
+
+                while current_date <= end_date:
+                    # Inserimos o horário de início e término da aula no current_date
+                    class_start_datetime = f"{current_date.strftime('%Y-%m-%d')}T{horario_inicio}:00"
+                    class_end_datetime = f"{current_date.strftime('%Y-%m-%d')}T{horario_fim}:00"
+
+                    notion.pages.create(
+                        parent={"database_id": calendar_id},
+                        properties={
+                            "Nome": {"title": [{"text": {"content": subject_name}}]},
+                            "Data": {
+                                "date": {
+                                    "start": class_start_datetime,
+                                    "end": class_end_datetime
+                                }
+                            },
+                            "Matéria": {
+                                "relation": [
+                                    {"id": subject_id}
+                                ]
+                            }
+                        }
+                    )
+                    current_date += timedelta(weeks=1)
 
                 i += 1  # Avançar para o próximo período
 
                 print(f"Horário de início: {horario_inicio}")
                 print(f"Horário de término: {horario_fim}")
                 print()
+        
+        print(f"✅ Eventos recorrentes criados para a matéria {subject_name}.")
 
 # Executar a função
 criar_eventos_recorrentes()
